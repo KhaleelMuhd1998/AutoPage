@@ -3,7 +3,7 @@
  * Plugin Name: AutoPage
  * Plugin URI: https://github.com/KhaleelMuhd1998/AutoPage
  * Description: Creates virtual child URLs for selected WordPress pages and renders typed dynamic content through [autopage] shortcodes.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Author: Khaleel M
  * Author URI: https://khaleelmuhd1998.github.io/
  * Requires at least: 7.1
@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 final class AutoPage_Plugin {
-    private const VERSION = '0.2.0';
+    private const VERSION = '0.2.1';
     private const QUERY_VAR = 'autopage_slug';
     private const MENU_SLUG = 'autopage';
     private const PER_PAGE = 20;
@@ -147,10 +147,12 @@ final class AutoPage_Plugin {
     }
 
     public static function enqueue_frontend_assets(): void {
-        $css = '.autopage-image-wrap{max-width:100%;}.autopage-image-wrap img.autopage-image{display:block;max-width:100%;height:auto;}.autopage-embed{position:relative;width:100%;max-width:100%;overflow:hidden;}.autopage-external-video iframe,.autopage-embed-url iframe{display:block;max-width:100%;width:100%;border:0;}.autopage-external-video{aspect-ratio:16/9;}.autopage-external-video iframe{width:100%;height:100%;}.autopage-embed-url iframe{min-height:450px;}';
-        wp_register_style( 'autopage-inline', false, array(), self::VERSION );
-        wp_enqueue_style( 'autopage-inline' );
-        wp_add_inline_style( 'autopage-inline', $css );
+        wp_enqueue_style(
+            'autopage',
+            plugin_dir_url( __FILE__ ) . 'assets/css/autopage.css',
+            array(),
+            self::VERSION
+        );
     }
 
     /** @param array<string,mixed> $atts */
@@ -362,6 +364,12 @@ final class AutoPage_Plugin {
 
             <?php self::render_admin_notice( $notice, $imported ); ?>
 
+            <div class="autopage-section autopage-instructions">
+                <p><strong>Shortcode example:</strong> <code>[autopage contentid="sample_content"]</code></p>
+                <p><strong>Permalink requirement:</strong> Use any WordPress pretty permalink structure. The <em>Plain</em> structure (<code>?p=123</code>) is not supported for AutoPage virtual slug URLs.</p>
+                <p><strong>Storage information:</strong> AutoPage stores each content as a row in <code>wp_autopage_content</code>.</p>
+            </div>
+
             <hr class="autopage-section-separator">
 
             <div class="autopage-section autopage-file-tools">
@@ -372,7 +380,7 @@ final class AutoPage_Plugin {
                     <span aria-hidden="true"> | </span>
                     <a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=autopage_download_sample_csv' ), 'autopage_download_sample_csv' ) ); ?>">Download Sample File</a>
                 </p>
-                <p class="description"><strong>Caution:</strong> <code>base_page + slug + content_id</code> are the unique identifiers. If an imported row matches an existing record, AutoPage updates that record instead of creating a duplicate.</p>
+                <p class="description"><code>base_page_id + slug + content_id</code> are the unique identifiers. If an imported row matches an existing record, AutoPage updates that record instead of creating a duplicate.</p>
                 <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" enctype="multipart/form-data" id="autopage-import-form" hidden>
                     <input type="hidden" name="action" value="autopage_import_csv">
                     <?php wp_nonce_field( 'autopage_import_csv' ); ?>
@@ -403,7 +411,7 @@ final class AutoPage_Plugin {
 
                     <div class="autopage-modal-header">
                         <h2 id="autopage-modal-title">Add Content</h2>
-                        <button type="button" class="button-link autopage-modal-x" data-autopage-close aria-label="Close" style="text-decoration: none;">×</button>
+                        <button type="button" class="button-link autopage-modal-x" data-autopage-close aria-label="Close">×</button>
                     </div>
 
                     <div class="autopage-modal-body">
@@ -478,12 +486,12 @@ final class AutoPage_Plugin {
                             <h3>External Video</h3>
                             <label for="autopage-video-url"><strong>Video URL</strong></label>
                             <input type="url" id="autopage-video-url" name="external_video_url" class="large-text" placeholder="https://www.youtube.com/watch?v=...">
-                            <p class="description">Uses WordPress oEmbed for supported external video providers (YouTube or Vimeo).</p>
+                            <p class="description">Uses WordPress oEmbed for supported external video providers.</p>
                         </div>
 
                         <div class="autopage-content-field" data-editor-type="embed_url" hidden>
                             <h3>Embed URL</h3>
-                            <p><label for="autopage-embed-url"><strong>iframe Source URL</strong></label><input type="url" id="autopage-embed-url" name="embed_url" class="large-text" placeholder="https://www.google.com/maps/embed?pb=..."></p>
+                            <p><label for="autopage-embed-url"><strong>Iframe source URL</strong></label><input type="url" id="autopage-embed-url" name="embed_url" class="large-text" placeholder="https://www.google.com/maps/embed?pb=..."></p>
                             <p><label for="autopage-embed-title"><strong>Accessible title</strong></label><input type="text" id="autopage-embed-title" name="embed_title" class="large-text" placeholder="Location map"></p>
                             <p class="description">Enter the iframe <code>src</code> URL, not complete iframe HTML.</p>
                         </div>
@@ -501,14 +509,6 @@ final class AutoPage_Plugin {
                         <button type="submit" class="button button-primary">Save Content</button>
                     </div>
                 </form>
-            </div>
-
-            <hr class="autopage-section-separator">
-
-            <div class="autopage-section autopage-instructions">
-                <p><strong>Shortcode example:</strong> <code>[autopage contentid="sample_content"]</code></p>
-                <p><strong>Permalink requirement:</strong> Use any WordPress pretty permalink structure. The <em>Plain</em> structure (<code>?p=123</code>) is not supported for AutoPage virtual slug URLs.</p>
-                <p><strong>Storage information:</strong> AutoPage stores each content as a row in <code>wp_autopage_content</code>.</p>
             </div>
         </div>
 
@@ -663,7 +663,7 @@ final class AutoPage_Plugin {
         } elseif ( 'imported' === $notice ) {
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( sprintf( '%d content rows imported.', $imported ) ) . '</p></div>';
         } elseif ( 'import_error' === $notice ) {
-            echo '<div class="notice notice-error"><p>The CSV file could not be imported. Check the file format and required columns.</p></div>';
+            echo '<div class="notice notice-error"><p>The CSV could not be imported. Check the file format and required columns.</p></div>';
         } elseif ( 'invalid' === $notice ) {
             echo '<div class="notice notice-error"><p>The content could not be saved because one or more required fields were invalid.</p></div>';
         }
@@ -769,7 +769,7 @@ final class AutoPage_Plugin {
             $wpdb->insert( $table, $payload, $formats );
         }
 
-        flush_rewrite_rules();
+        self::refresh_rewrite_rules();
         wp_safe_redirect( self::admin_url_with( array( 'autopage_notice' => 'saved' ) ) );
         exit;
     }
@@ -785,7 +785,7 @@ final class AutoPage_Plugin {
         if ( $id > 0 ) {
             global $wpdb;
             $wpdb->delete( self::table_name(), array( 'id' => $id ), array( '%d' ) );
-            flush_rewrite_rules();
+            self::refresh_rewrite_rules();
         }
 
         wp_safe_redirect( self::admin_url_with( array( 'autopage_notice' => 'deleted' ) ) );
@@ -945,6 +945,17 @@ final class AutoPage_Plugin {
         $header = fgetcsv( $handle, 0, ',', '"', '' );
         $required = array( 'title', 'base_page_id', 'url_slug', 'content_id', 'type', 'status' );
 
+        if ( is_array( $header ) ) {
+            $header = array_map(
+                static function ( mixed $value ): string {
+                    $value = (string) $value;
+                    $value = preg_replace( '/^\xEF\xBB\xBF/', '', $value ) ?? $value;
+                    return strtolower( trim( $value ) );
+                },
+                $header
+            );
+        }
+
         if ( ! is_array( $header ) || array_diff( $required, $header ) ) {
             fclose( $handle );
             wp_safe_redirect( self::admin_url_with( array( 'autopage_notice' => 'import_error' ) ) );
@@ -1031,7 +1042,7 @@ final class AutoPage_Plugin {
         }
 
         fclose( $handle );
-        flush_rewrite_rules();
+        self::refresh_rewrite_rules();
         wp_safe_redirect( self::admin_url_with( array( 'autopage_notice' => 'imported', 'imported' => $imported ) ) );
         exit;
     }
@@ -1129,6 +1140,11 @@ final class AutoPage_Plugin {
 
     public static function per_page(): int {
         return self::PER_PAGE;
+    }
+
+    public static function refresh_rewrite_rules(): void {
+        self::register_rewrite_rules();
+        flush_rewrite_rules();
     }
 
     public static function activate(): void {
@@ -1259,7 +1275,7 @@ if ( is_admin() ) {
                 $sql = $wpdb->prepare( "UPDATE {$table} SET status=%s, updated_at=%s WHERE id IN ({$placeholders})", ...$params );
                 $wpdb->query( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
             }
-            flush_rewrite_rules();
+            AutoPage_Plugin::refresh_rewrite_rules();
         }
 
         public function prepare_items(): void {
