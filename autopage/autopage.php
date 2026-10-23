@@ -3,7 +3,7 @@
  * Plugin Name: AutoPage
  * Plugin URI: https://github.com/KhaleelMuhd1998/AutoPage
  * Description: Creates virtual child URLs for selected WordPress pages and renders typed dynamic content through [autopage] shortcodes.
- * Version: 0.2.1
+ * Version: 0.2.4
  * Author: Khaleel M
  * Author URI: https://khaleelmuhd1998.github.io/
  * Requires at least: 7.1
@@ -19,13 +19,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 final class AutoPage_Plugin {
-    private const VERSION = '0.2.1';
+    private const VERSION = '0.2.4';
     private const QUERY_VAR = 'autopage_slug';
     private const MENU_SLUG = 'autopage';
     private const PER_PAGE = 20;
 
     /** @var string[] */
-    private const CONTENT_TYPES = array( 'rich_text', 'image', 'external_video', 'embed_url', 'button' );
+    private const CONTENT_TYPES = array( 'rich_text', 'image', 'external_video', 'embed_url', 'button', 'page_title' );
 
     /** @var string[] */
     private const STATUSES = array( 'active', 'inactive' );
@@ -34,9 +34,11 @@ final class AutoPage_Plugin {
         add_action( 'init', array( __CLASS__, 'register_shortcodes' ) );
         add_action( 'init', array( __CLASS__, 'register_rewrite_rules' ), 20 );
         add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_frontend_assets' ) );
+        add_action( 'wp_sitemaps_init', array( __CLASS__, 'register_sitemap_provider' ) );
 
         add_filter( 'query_vars', array( __CLASS__, 'register_query_vars' ) );
         add_filter( 'redirect_canonical', array( __CLASS__, 'prevent_virtual_url_canonical_redirect' ), 10, 2 );
+        add_filter( 'pre_get_document_title', array( __CLASS__, 'filter_document_title' ) );
         add_action( 'template_redirect', array( __CLASS__, 'validate_virtual_request' ), 1 );
 
         if ( is_admin() ) {
@@ -101,6 +103,7 @@ final class AutoPage_Plugin {
             'external_video' => 'External Video',
             'embed_url'      => 'Embed URL',
             'button'         => 'Button',
+            'page_title'     => 'Page Title',
         );
     }
 
@@ -183,6 +186,7 @@ final class AutoPage_Plugin {
             'external_video' => self::render_external_video( $data ),
             'embed_url'      => self::render_embed_url( $data ),
             'button'         => self::render_button( $data ),
+            'page_title'     => '',
             default          => '',
         };
     }
@@ -274,6 +278,29 @@ final class AutoPage_Plugin {
 
         $target = $new_tab ? ' target="_blank" rel="noopener noreferrer"' : '';
         return sprintf( '<a class="autopage-button wp-element-button" href="%1$s"%2$s>%3$s</a>', esc_url( $url ), $target, esc_html( $label ) );
+    }
+
+    public static function filter_document_title( string $title ): string {
+        if ( is_admin() ) {
+            return $title;
+        }
+
+        $base_page_id = get_queried_object_id();
+        if ( $base_page_id <= 0 || 'page' !== get_post_type( $base_page_id ) ) {
+            return $title;
+        }
+
+        $slug = sanitize_title( (string) get_query_var( self::QUERY_VAR ) );
+        $row = self::get_row_for_request( $base_page_id, $slug, 'pagetitle' );
+
+        if ( ! $row || 'page_title' !== (string) ( $row['type'] ?? '' ) ) {
+            return $title;
+        }
+
+        $data = is_array( $row['data'] ?? null ) ? $row['data'] : array();
+        $page_title = isset( $data['title'] ) ? sanitize_text_field( (string) $data['title'] ) : '';
+
+        return '' !== $page_title ? $page_title : $title;
     }
 
     public static function prevent_virtual_url_canonical_redirect( string|false $redirect_url, string $requested_url ): string|false {
@@ -475,6 +502,13 @@ final class AutoPage_Plugin {
                             <textarea id="autopage-modal-rich" name="rich_text" rows="14"></textarea>
                         </div>
 
+                        <div class="autopage-content-field" data-editor-type="page_title" hidden>
+                            <h3>Page Title</h3>
+                            <label for="autopage-page-title"><strong>Page Title</strong></label>
+                            <input type="text" id="autopage-page-title" name="page_title" class="large-text" placeholder="Sample Page">
+                            <p class="description">Overrides the document title for this route. Content ID is fixed to <code>pagetitle</code>.</p>
+                        </div>
+
                         <div class="autopage-content-field" data-editor-type="image" hidden>
                             <h3>Image</h3>
                             <input type="hidden" id="autopage-image-id" name="attachment_id">
@@ -551,6 +585,17 @@ final class AutoPage_Plugin {
                 qa('.autopage-content-field',modal).forEach(el=>el.hidden=el.dataset.editorType!==type);
             }
 
+            function syncReservedContentId(type){
+                const field=q('#autopage-content-id');
+                if(type==='page_title'){
+                    field.value='pagetitle';
+                    field.readOnly=true;
+                }else{
+                    if(field.readOnly&&field.value==='pagetitle')field.value='';
+                    field.readOnly=false;
+                }
+            }
+
             function resetForm(){
                 destroyEditor();
                 q('#autopage-record-id').value='0';
@@ -559,7 +604,9 @@ final class AutoPage_Plugin {
                 q('#autopage-slug').value='';
                 q('#autopage-content-id').value='';
                 q('#autopage-type').value='rich_text';
+                syncReservedContentId('rich_text');
                 q('#autopage-status').value='active';
+                q('#autopage-page-title').value='';
                 q('#autopage-image-id').value='';
                 q('#autopage-image-preview').innerHTML='';
                 q('#autopage-video-url').value='';
@@ -586,12 +633,14 @@ final class AutoPage_Plugin {
                     q('#autopage-slug').value=record.slug||'';
                     q('#autopage-content-id').value=record.content_id||'';
                     q('#autopage-type').value=record.type||'rich_text';
+                    syncReservedContentId(record.type||'rich_text');
                     q('#autopage-status').value=record.status||'active';
                     q('#autopage-author-display').textContent=record.author_display||'—';
                     q('#autopage-created-display').textContent=record.created_display||'—';
                     qa('.autopage-existing-meta',modal).forEach(el=>el.hidden=false);
 
                     const data=record.data||{};
+                    q('#autopage-page-title').value=record.type==='page_title'?(data.title||''):'';
                     q('#autopage-image-id').value=data.attachment_id||'';
                     if(record.image_preview)q('#autopage-image-preview').innerHTML='<img src="'+String(record.image_preview).replace(/"/g,'&quot;')+'" alt="">';
                     q('#autopage-video-url').value=data.url&&record.type==='external_video'?data.url:'';
@@ -627,6 +676,7 @@ final class AutoPage_Plugin {
             qa('[data-autopage-close]',modal).forEach(el=>el.addEventListener('click',closeModal));
             q('#autopage-type').addEventListener('change',e=>{
                 const type=e.target.value;
+                syncReservedContentId(type);
                 destroyEditor();
                 showType(type);
                 if(type==='rich_text')setTimeout(()=>initEditor(q('#autopage-modal-rich').value||''),0);
@@ -690,6 +740,9 @@ final class AutoPage_Plugin {
                 'url' => isset( $source['button_url'] ) ? esc_url_raw( (string) $source['button_url'] ) : '',
                 'new_tab' => isset( $source['button_new_tab'] ) && '1' === (string) $source['button_new_tab'],
             ),
+            'page_title' => array(
+                'title' => isset( $source['page_title'] ) ? sanitize_text_field( (string) $source['page_title'] ) : '',
+            ),
             default => array(),
         };
     }
@@ -709,6 +762,10 @@ final class AutoPage_Plugin {
         $content_id = isset( $post['content_id'] ) ? sanitize_key( (string) $post['content_id'] ) : '';
         $type = isset( $post['type'] ) ? sanitize_key( (string) $post['type'] ) : 'rich_text';
         $status = isset( $post['status'] ) ? sanitize_key( (string) $post['status'] ) : 'active';
+
+        if ( 'page_title' === $type ) {
+            $content_id = 'pagetitle';
+        }
 
         if (
             '' === $title ||
@@ -863,7 +920,7 @@ final class AutoPage_Plugin {
             exit;
         }
 
-        $headers = array( 'title', 'base_page_id', 'url_slug', 'content_id', 'type', 'status', 'author_login', 'created_at', 'rich_text', 'attachment_id', 'external_video_url', 'embed_url', 'embed_title', 'button_text', 'button_url', 'button_new_tab' );
+        $headers = array( 'title', 'base_page_id', 'url_slug', 'content_id', 'type', 'status', 'author_login', 'created_at', 'page_title', 'rich_text', 'attachment_id', 'external_video_url', 'embed_url', 'embed_title', 'button_text', 'button_url', 'button_new_tab' );
         fputcsv( $out, $headers, ',', '"', '' );
 
         if ( is_array( $rows ) ) {
@@ -884,6 +941,7 @@ final class AutoPage_Plugin {
                         (string) $row['status'],
                         (string) ( $row['author_login'] ?? '' ),
                         (string) $row['created_at'],
+                        'page_title' === $row['type'] ? (string) ( $data['title'] ?? '' ) : '',
                         'rich_text' === $row['type'] ? (string) ( $data['html'] ?? '' ) : '',
                         'image' === $row['type'] ? (string) ( $data['attachment_id'] ?? '' ) : '',
                         'external_video' === $row['type'] ? (string) ( $data['url'] ?? '' ) : '',
@@ -919,7 +977,7 @@ final class AutoPage_Plugin {
             exit;
         }
 
-        fputcsv( $out, array( 'title', 'base_page_id', 'url_slug', 'content_id', 'type', 'status', 'rich_text', 'attachment_id', 'external_video_url', 'embed_url', 'embed_title', 'button_text', 'button_url', 'button_new_tab' ), ',', '"', '' );
+        fputcsv( $out, array( 'title', 'base_page_id', 'url_slug', 'content_id', 'type', 'status', 'page_title', 'rich_text', 'attachment_id', 'external_video_url', 'embed_url', 'embed_title', 'button_text', 'button_url', 'button_new_tab' ), ',', '"', '' );
         fclose( $out );
         exit;
     }
@@ -983,6 +1041,10 @@ final class AutoPage_Plugin {
             $type = sanitize_key( $get( 'type' ) );
             $status = sanitize_key( $get( 'status' ) );
 
+            if ( 'page_title' === $type ) {
+                $content_id = 'pagetitle';
+            }
+
             if (
                 '' === $title ||
                 $base_page_id <= 0 ||
@@ -996,6 +1058,7 @@ final class AutoPage_Plugin {
             }
 
             $source = array(
+                'page_title'         => $get( 'page_title' ),
                 'rich_text'         => $get( 'rich_text' ),
                 'attachment_id'     => $get( 'attachment_id' ),
                 'external_video_url'=> $get( 'external_video_url' ),
@@ -1113,6 +1176,98 @@ final class AutoPage_Plugin {
         return $routes;
     }
 
+    public static function register_sitemap_provider(): void {
+        if ( ! function_exists( 'wp_register_sitemap_provider' ) || ! class_exists( 'WP_Sitemaps_Provider' ) ) {
+            return;
+        }
+
+        wp_register_sitemap_provider( 'autopage', new AutoPage_Sitemap_Provider() );
+    }
+
+    /** @return array<int,array{loc:string,lastmod:string}> */
+    public static function get_sitemap_url_list( int $page_num, int $per_page ): array {
+        global $wpdb;
+
+        if ( $page_num < 1 || $per_page < 1 ) {
+            return array();
+        }
+
+        $table = self::table_name();
+        $posts = $wpdb->posts;
+        $offset = ( $page_num - 1 ) * $per_page;
+
+        $sql = $wpdb->prepare(
+            "SELECT c.base_page_id, c.slug, MAX(c.updated_at) AS last_modified
+             FROM {$table} c
+             INNER JOIN {$posts} p ON p.ID = c.base_page_id
+             WHERE c.status = 'active'
+               AND c.slug <> ''
+               AND p.post_type = 'page'
+               AND p.post_status = 'publish'
+             GROUP BY c.base_page_id, c.slug
+             ORDER BY c.base_page_id ASC, c.slug ASC
+             LIMIT %d OFFSET %d",
+            $per_page,
+            $offset
+        );
+
+        $rows = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        if ( ! is_array( $rows ) ) {
+            return array();
+        }
+
+        $urls = array();
+        foreach ( $rows as $row ) {
+            $base_page_id = (int) $row['base_page_id'];
+            $slug = sanitize_title( (string) $row['slug'] );
+            $base_permalink = get_permalink( $base_page_id );
+
+            if ( ! is_string( $base_permalink ) || '' === $base_permalink || '' === $slug ) {
+                continue;
+            }
+
+            $loc = trailingslashit( $base_permalink ) . rawurlencode( $slug ) . '/';
+            $last_modified = (string) $row['last_modified'];
+            $entry = array( 'loc' => esc_url_raw( $loc ) );
+
+            if ( '' !== $last_modified ) {
+                $timestamp = strtotime( $last_modified . ' ' . wp_timezone_string() );
+                if ( false !== $timestamp ) {
+                    $entry['lastmod'] = wp_date( DATE_W3C, $timestamp );
+                }
+            }
+
+            $urls[] = $entry;
+        }
+
+        return $urls;
+    }
+
+    public static function get_sitemap_max_num_pages( int $per_page ): int {
+        global $wpdb;
+
+        if ( $per_page < 1 ) {
+            return 0;
+        }
+
+        $table = self::table_name();
+        $posts = $wpdb->posts;
+        $count = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM (
+                SELECT c.base_page_id, c.slug
+                FROM {$table} c
+                INNER JOIN {$posts} p ON p.ID = c.base_page_id
+                WHERE c.status = 'active'
+                  AND c.slug <> ''
+                  AND p.post_type = 'page'
+                  AND p.post_status = 'publish'
+                GROUP BY c.base_page_id, c.slug
+            ) autopage_routes" // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        );
+
+        return (int) ceil( $count / $per_page );
+    }
+
     private static function get_page_relative_path( int $page_id ): string {
         $permalink = get_permalink( $page_id );
         if ( ! is_string( $permalink ) || '' === $permalink ) {
@@ -1161,6 +1316,35 @@ final class AutoPage_Plugin {
 AutoPage_Plugin::init();
 register_activation_hook( __FILE__, array( 'AutoPage_Plugin', 'activate' ) );
 register_deactivation_hook( __FILE__, array( 'AutoPage_Plugin', 'deactivate' ) );
+
+if ( ! class_exists( 'WP_Sitemaps_Provider' ) ) {
+    $autopage_sitemap_provider_file = ABSPATH . WPINC . '/sitemaps/class-wp-sitemaps-provider.php';
+    if ( is_readable( $autopage_sitemap_provider_file ) ) {
+        require_once $autopage_sitemap_provider_file;
+    }
+}
+
+if ( class_exists( 'WP_Sitemaps_Provider' ) ) {
+    final class AutoPage_Sitemap_Provider extends WP_Sitemaps_Provider {
+        public function __construct() {
+            $this->name = 'autopage';
+            $this->object_type = 'autopage';
+        }
+
+        /** @return array<int,array{loc:string,lastmod?:string}> */
+        public function get_url_list( $page_num, $object_subtype = '' ): array {
+            unset( $object_subtype );
+            $per_page = function_exists( 'wp_sitemaps_get_max_urls' ) ? wp_sitemaps_get_max_urls( $this->object_type ) : 2000;
+            return AutoPage_Plugin::get_sitemap_url_list( (int) $page_num, (int) $per_page );
+        }
+
+        public function get_max_num_pages( $object_subtype = '' ): int {
+            unset( $object_subtype );
+            $per_page = function_exists( 'wp_sitemaps_get_max_urls' ) ? wp_sitemaps_get_max_urls( $this->object_type ) : 2000;
+            return AutoPage_Plugin::get_sitemap_max_num_pages( (int) $per_page );
+        }
+    }
+}
 
 if ( is_admin() ) {
     require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php';
